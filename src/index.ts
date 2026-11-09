@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   const summaries: ModelSummary[] = [];
 
   for (const model of models) {
-    console.log(`\n${model.label} (${model.id}, ${model.protocol})`);
+    console.log(`\n${model.label} (${model.id}, ${model.protocol}${model.reasoningEffort ? `, effort=${model.reasoningEffort}` : ""})`);
     const chat = createChat(model);
     const runs: RunRecord[] = [];
 

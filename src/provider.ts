@@ -43,7 +43,25 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
 }
 
 export function createChat(model: ModelConfig): ChatFn {
-  return model.protocol === "anthropic" ? createAnthropicChat(model) : createOpenAIChat(model);
+  if (model.protocol === "anthropic") return createAnthropicChat(model);
+  if (model.protocol === "openai-responses") return createOpenAIResponsesChat(model);
+  return createOpenAIChat(model);
+}
+
+function toOpenAIMessages(messages: ChatMessage[]) {
+  return messages.map((message) => {
+    if (message.role === "assistant") {
+      return {
+        role: "assistant",
+        content: message.content,
+        ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
+      };
+    }
+    if (message.role === "tool") {
+      return { role: "tool", tool_call_id: message.tool_call_id, content: message.content };
+    }
+    return { role: message.role, content: message.content };
+  });
 }
 
 function createOpenAIChat(model: ModelConfig): ChatFn {
@@ -53,7 +71,8 @@ function createOpenAIChat(model: ModelConfig): ChatFn {
       { authorization: `Bearer ${model.apiKey}` },
       {
         model: request.model,
-        messages: request.messages,
+        messages: toOpenAIMessages(request.messages),
+        ...(model.reasoningEffort ? { reasoning_effort: model.reasoningEffort } : {}),
         ...(request.tools.length ? { tools: request.tools, tool_choice: "auto" } : {}),
       },
     )) as {
@@ -73,6 +92,115 @@ function createOpenAIChat(model: ModelConfig): ChatFn {
       usage: {
         input: payload.usage?.prompt_tokens ?? 0,
         output: payload.usage?.completion_tokens ?? 0,
+      },
+    };
+  };
+}
+
+interface ResponsesItem {
+  type: string;
+  role?: string;
+  content?: Array<{ type: string; text?: string }>;
+  call_id?: string;
+  name?: string;
+  arguments?: string;
+}
+
+function toResponsesInput(messages: ChatMessage[]): { instructions: string; input: unknown[] } {
+  let instructions = "";
+  const input: unknown[] = [];
+
+  for (const message of messages) {
+    if (message.role === "system") {
+      instructions = instructions ? `${instructions}\n\n${message.content}` : message.content;
+      continue;
+    }
+
+    if (message.role === "user") {
+      input.push({ role: "user", content: message.content });
+      continue;
+    }
+
+    if (message.role === "assistant") {
+      if (message.responsesOutput?.length) {
+        input.push(...message.responsesOutput);
+      } else {
+        const content: unknown[] = [];
+        if (message.content) content.push({ type: "output_text", text: message.content });
+        for (const call of message.tool_calls ?? []) {
+          content.push({
+            type: "function_call",
+            call_id: call.id,
+            name: call.function.name,
+            arguments: call.function.arguments,
+          });
+        }
+        if (content.length) input.push({ role: "assistant", content });
+      }
+      continue;
+    }
+
+    input.push({ type: "function_call_output", call_id: message.tool_call_id, output: message.content });
+  }
+
+  return { instructions, input };
+}
+
+function createOpenAIResponsesChat(model: ModelConfig): ChatFn {
+  return async (request) => {
+    const { instructions, input } = toResponsesInput(request.messages);
+
+    const payload = (await postJson(
+      `${model.baseUrl}/responses`,
+      { authorization: `Bearer ${model.apiKey}` },
+      {
+        model: request.model,
+        input,
+        store: false,
+        ...(instructions ? { instructions } : {}),
+        ...(model.reasoningEffort ? { reasoning: { effort: model.reasoningEffort } } : {}),
+        ...(request.tools.length
+          ? {
+              tools: request.tools.map((tool) => ({
+                type: "function",
+                name: tool.function.name,
+                description: tool.function.description,
+                parameters: tool.function.parameters,
+              })),
+              tool_choice: "auto",
+            }
+          : {}),
+      },
+    )) as {
+      output?: ResponsesItem[];
+      usage?: { input_tokens?: number; output_tokens?: number };
+    };
+
+    const output = payload.output ?? [];
+    const text = output
+      .filter((item) => item.type === "message")
+      .flatMap((item) => item.content ?? [])
+      .filter((block) => block.type === "output_text")
+      .map((block) => block.text ?? "")
+      .join("");
+    const toolCalls: ToolCall[] = output
+      .filter((item) => item.type === "function_call")
+      .map((item) => ({
+        id: item.call_id ?? "",
+        type: "function",
+        function: { name: item.name ?? "", arguments: item.arguments ?? "{}" },
+      }));
+
+    return {
+      message: {
+        role: "assistant",
+        content: text || null,
+        ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+        ...(output.length ? { responsesOutput: output } : {}),
+      },
+      usage: {
+        input: payload.usage?.input_tokens ?? 0,
+        output: payload.usage?.output_tokens ?? 0,
       },
     };
   };

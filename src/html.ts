@@ -91,7 +91,7 @@ function modelCard(model: ModelSummary, index: number): string {
       <span class="swatch" style="background:${color(index)}"></span>
       <div>
         <h2>${escapeHtml(model.label)}</h2>
-        <p class="mono">${escapeHtml(model.modelId)} · ${escapeHtml(model.protocol)}</p>
+        <p class="mono">${escapeHtml(model.modelId)} · ${escapeHtml(model.protocol)}${model.reasoningEffort ? ` · effort ${escapeHtml(model.reasoningEffort)}` : ""}</p>
       </div>
     </div>
     <div class="score"><strong>${pct(model.correctnessRate)}</strong><span>${model.correct} of ${model.tasks} correct</span></div>

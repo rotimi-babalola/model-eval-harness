@@ -3,15 +3,19 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { createChat } from "../src/provider";
-import type { ChatMessage, ModelConfig, ToolSchema } from "../src/types";
+import type { ChatMessage, ModelConfig, Protocol, ToolSchema } from "../src/types";
 
 interface Captured {
   path: string | undefined;
   headers: http.IncomingHttpHeaders;
   body: {
     system?: string;
+    instructions?: string;
+    input?: unknown[];
     messages: Array<{ role: string; content: unknown }>;
     tools?: Array<Record<string, unknown>>;
+    reasoning_effort?: string;
+    reasoning?: { effort?: string };
   };
 }
 
@@ -55,7 +59,7 @@ const tools: ToolSchema[] = [
   },
 ];
 
-function model(protocol: "openai" | "anthropic", baseUrl: string): ModelConfig {
+function model(protocol: Protocol, baseUrl: string): ModelConfig {
   return {
     id: "test-model",
     label: "test-model",
@@ -94,8 +98,96 @@ test("OpenAI adapter sends tools and parses tool calls", async () => {
     assert.equal(captured[0].path, "/v1/chat/completions");
     assert.equal(captured[0].headers.authorization, "Bearer secret");
     assert.equal(captured[0].body.tools?.length, 1);
+    assert.equal(captured[0].body.reasoning_effort, undefined);
     assert.equal(result.message.tool_calls?.[0].function.arguments, '{"expression":"1+1"}');
     assert.deepEqual(result.usage, { input: 11, output: 7 });
+  });
+});
+
+test("OpenAI adapter forwards reasoning_effort when configured", async () => {
+  const response = {
+    choices: [{ message: { role: "assistant", content: "ok" } }],
+    usage: { prompt_tokens: 1, completion_tokens: 1 },
+  };
+
+  await withServer(response, async (url, captured) => {
+    const chat = createChat({ ...model("openai", url), reasoningEffort: "none" });
+    await chat({ model: "test-model", messages: [{ role: "user", content: "go" }], tools });
+
+    assert.equal(captured[0].body.reasoning_effort, "none");
+  });
+});
+
+test("Responses adapter replays reasoning and tool outputs", async () => {
+  const response = {
+    output: [
+      { type: "reasoning", id: "rs_1", summary: [] },
+      {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Working" }],
+      },
+      {
+        type: "function_call",
+        id: "fc_1",
+        call_id: "call_1",
+        name: "calculator",
+        arguments: '{"expression":"1+1"}',
+      },
+    ],
+    usage: { input_tokens: 13, output_tokens: 5 },
+  };
+
+  const priorOutput = [
+    { type: "reasoning", id: "rs_0", summary: [] },
+    {
+      type: "function_call",
+      id: "fc_0",
+      call_id: "call_0",
+      name: "calculator",
+      arguments: '{"expression":"1+1"}',
+    },
+  ];
+
+  const messages: ChatMessage[] = [
+    { role: "system", content: "be useful" },
+    { role: "user", content: "go" },
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        { id: "call_0", type: "function", function: { name: "calculator", arguments: '{"expression":"1+1"}' } },
+      ],
+      responsesOutput: priorOutput,
+    },
+    { role: "tool", tool_call_id: "call_0", content: "2" },
+  ];
+
+  await withServer(response, async (url, captured) => {
+    const chat = createChat({ ...model("openai-responses", url), reasoningEffort: "low" });
+    const result = await chat({ model: "test-model", messages, tools });
+
+    const request = captured[0];
+    assert.equal(request.path, "/v1/responses");
+    assert.equal(request.headers.authorization, "Bearer secret");
+    assert.equal(request.body.instructions, "be useful");
+    assert.deepEqual(request.body.reasoning, { effort: "low" });
+    assert.equal(request.body.input?.length, 4);
+    assert.deepEqual(request.body.input?.[0], { role: "user", content: "go" });
+    assert.deepEqual(request.body.input?.[1], priorOutput[0]);
+    assert.deepEqual(request.body.input?.[2], priorOutput[1]);
+    assert.deepEqual(request.body.input?.[3], {
+      type: "function_call_output",
+      call_id: "call_0",
+      output: "2",
+    });
+    assert.equal(request.body.tools?.[0].name, "calculator");
+    assert.equal(request.body.tools?.[0].function, undefined);
+
+    assert.equal(result.message.content, "Working");
+    assert.equal(result.message.tool_calls?.[0].id, "call_1");
+    assert.equal(result.message.responsesOutput?.length, 3);
+    assert.deepEqual(result.usage, { input: 13, output: 5 });
   });
 });
 

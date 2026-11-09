@@ -1,4 +1,16 @@
-import type { ModelConfig, Protocol } from "./types";
+import type { ModelConfig, Protocol, ReasoningEffort } from "./types";
+
+const REASONING_EFFORTS = new Set<ReasoningEffort>([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+
+const PROTOCOLS = new Set<Protocol>(["openai", "openai-responses", "anthropic"]);
 
 function numberFromEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -12,10 +24,12 @@ function numberFromEnv(name: string, fallback: number): number {
 
 function protocolFromEnv(prefix: string): Protocol {
   const raw = process.env[`${prefix}_PROTOCOL`] || "openai";
-  if (raw !== "openai" && raw !== "anthropic") {
-    throw new Error(`${prefix}_PROTOCOL must be "openai" or "anthropic", got "${raw}"`);
+  if (!PROTOCOLS.has(raw as Protocol)) {
+    throw new Error(
+      `${prefix}_PROTOCOL must be one of ${[...PROTOCOLS].join(", ")}, got "${raw}"`,
+    );
   }
-  return raw;
+  return raw as Protocol;
 }
 
 function modelFromEnv(
@@ -25,6 +39,14 @@ function modelFromEnv(
   const protocol = protocolFromEnv(prefix);
   const id = process.env[prefix] || defaults.id;
   const isAnthropic = protocol === "anthropic";
+
+  const effortRaw = process.env[`${prefix}_REASONING_EFFORT`];
+  if (effortRaw && !REASONING_EFFORTS.has(effortRaw as ReasoningEffort)) {
+    throw new Error(
+      `${prefix}_REASONING_EFFORT must be one of ${[...REASONING_EFFORTS].join(", ")}, got "${effortRaw}"`,
+    );
+  }
+  const reasoningEffort = effortRaw as ReasoningEffort | undefined;
 
   const baseUrl = (
     process.env[`${prefix}_BASE_URL`] ||
@@ -42,6 +64,7 @@ function modelFromEnv(
     protocol,
     baseUrl,
     apiKey,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     inputPricePerMTok: numberFromEnv(`${prefix}_INPUT_PRICE`, defaults.inputPrice),
     outputPricePerMTok: numberFromEnv(`${prefix}_OUTPUT_PRICE`, defaults.outputPrice),
   };

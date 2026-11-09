@@ -17,9 +17,11 @@ npm test
 
 ## Providers and models
 
-Each model can use either protocol:
+Each model can use one of three protocols:
 
 - **`openai`** (default): any OpenAI-compatible Chat Completions endpoint.
+- **`openai-responses`**: OpenAI's Responses API. Required for reasoning models
+  (for example GPT-6 Astra / GPT-6.1 Sol) when function tools are enabled.
 - **`anthropic`**: the native Anthropic Messages API.
 
 Most non-OpenAI models are reachable through an OpenAI-compatible endpoint:
@@ -77,7 +79,8 @@ MODEL_B_OUTPUT_PRICE=0.42
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `MODEL_A` / `MODEL_B` | `gpt-4o-mini` / `gpt-4o` | API model IDs |
-| `MODEL_A_PROTOCOL` / `MODEL_B_PROTOCOL` | `openai` | `openai` or `anthropic` |
+| `MODEL_A_PROTOCOL` / `MODEL_B_PROTOCOL` | `openai` | `openai`, `openai-responses` or `anthropic` |
+| `MODEL_A_REASONING_EFFORT` / `MODEL_B_REASONING_EFFORT` | unset | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 | `MODEL_A_BASE_URL` / `MODEL_B_BASE_URL` | protocol default | Override the endpoint per model |
 | `MODEL_A_API_KEY` / `MODEL_B_API_KEY` | protocol key | Override the key per model |
 | `MODEL_A_LABEL` / `MODEL_B_LABEL` | model ID | Name shown in reports |
@@ -92,6 +95,30 @@ Shared fallbacks:
 
 Prices are provider- and contract-specific. Update them before trusting the cost
 columns.
+
+### Reasoning models and function tools
+
+GPT-6 Astra and GPT-6.1 Sol do not support function tools on
+`/v1/chat/completions` while reasoning is enabled, and Astra rejects
+`reasoning_effort: "none"` entirely. Use the Responses API:
+
+```sh
+MODEL_A_PROTOCOL=openai-responses
+MODEL_A=gpt-6-astra
+MODEL_A_REASONING_EFFORT=low        # Astra supports low/medium/high/xhigh/max
+
+MODEL_B_PROTOCOL=openai-responses
+MODEL_B=gpt-6.1-sol
+MODEL_B_REASONING_EFFORT=medium     # Sol supports low/medium/high/xhigh/max
+```
+
+Omit `*_REASONING_EFFORT` to use the model's default. The Responses adapter
+replays the raw reasoning and function-call items between tool turns, which these
+models require.
+
+Chat Completions still works for other models. Only use
+`*_REASONING_EFFORT=none` there when the model both supports `none` and you want
+tool calls without reasoning.
 
 ## What gets measured
 
