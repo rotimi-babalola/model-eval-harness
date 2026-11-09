@@ -7,6 +7,9 @@ import type { ChatFn, ChatResult, ModelConfig, RunRecord } from "../src/types";
 const model: ModelConfig = {
   id: "test-model",
   label: "test-model",
+  protocol: "openai",
+  baseUrl: "http://localhost",
+  apiKey: "test",
   inputPricePerMTok: 1,
   outputPricePerMTok: 2,
 };

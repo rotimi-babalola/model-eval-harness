@@ -1,4 +1,4 @@
-import type { ModelConfig } from "./types";
+import type { ModelConfig, Protocol } from "./types";
 
 function numberFromEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -10,24 +10,50 @@ function numberFromEnv(name: string, fallback: number): number {
   return value;
 }
 
+function protocolFromEnv(prefix: string): Protocol {
+  const raw = process.env[`${prefix}_PROTOCOL`] || "openai";
+  if (raw !== "openai" && raw !== "anthropic") {
+    throw new Error(`${prefix}_PROTOCOL must be "openai" or "anthropic", got "${raw}"`);
+  }
+  return raw;
+}
+
+function modelFromEnv(
+  prefix: "MODEL_A" | "MODEL_B",
+  defaults: { id: string; inputPrice: number; outputPrice: number },
+): ModelConfig {
+  const protocol = protocolFromEnv(prefix);
+  const id = process.env[prefix] || defaults.id;
+  const isAnthropic = protocol === "anthropic";
+
+  const baseUrl = (
+    process.env[`${prefix}_BASE_URL`] ||
+    (isAnthropic ? process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com/v1" : process.env.OPENAI_BASE_URL || "https://api.openai.com/v1")
+  ).replace(/\/$/, "");
+
+  const apiKey =
+    process.env[`${prefix}_API_KEY`] ||
+    (isAnthropic ? process.env.ANTHROPIC_API_KEY : process.env.OPENAI_API_KEY) ||
+    "";
+
+  return {
+    id,
+    label: process.env[`${prefix}_LABEL`] || id,
+    protocol,
+    baseUrl,
+    apiKey,
+    inputPricePerMTok: numberFromEnv(`${prefix}_INPUT_PRICE`, defaults.inputPrice),
+    outputPricePerMTok: numberFromEnv(`${prefix}_OUTPUT_PRICE`, defaults.outputPrice),
+  };
+}
+
 // Prices are USD per 1M tokens. Defaults are OpenAI list prices; update them
 // (or override with env vars) before comparing cost across providers.
 export function loadModels(): ModelConfig[] {
   return [
-    {
-      id: process.env.MODEL_A || "gpt-4o-mini",
-      label: process.env.MODEL_A_LABEL || "gpt-4o-mini",
-      inputPricePerMTok: numberFromEnv("MODEL_A_INPUT_PRICE", 0.15),
-      outputPricePerMTok: numberFromEnv("MODEL_A_OUTPUT_PRICE", 0.6),
-    },
-    {
-      id: process.env.MODEL_B || "gpt-4o",
-      label: process.env.MODEL_B_LABEL || "gpt-4o",
-      inputPricePerMTok: numberFromEnv("MODEL_B_INPUT_PRICE", 2.5),
-      outputPricePerMTok: numberFromEnv("MODEL_B_OUTPUT_PRICE", 10),
-    },
+    modelFromEnv("MODEL_A", { id: "gpt-4o-mini", inputPrice: 0.15, outputPrice: 0.6 }),
+    modelFromEnv("MODEL_B", { id: "gpt-4o", inputPrice: 2.5, outputPrice: 10 }),
   ];
 }
 
-export const baseUrl = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
 export const maxSteps = numberFromEnv("MAX_STEPS", 8);

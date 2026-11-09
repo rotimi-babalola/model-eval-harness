@@ -21,6 +21,7 @@ export function summarizeModel(model: ModelConfig, runs: RunRecord[]): ModelSumm
   return {
     modelId: model.id,
     label: model.label,
+    protocol: model.protocol,
     tasks: runs.length,
     completed,
     correct,

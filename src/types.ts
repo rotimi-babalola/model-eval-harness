@@ -5,7 +5,8 @@ export interface ToolCall {
 }
 
 export type ChatMessage =
-  | { role: "system" | "user"; content: string }
+  | { role: "system"; content: string }
+  | { role: "user"; content: string }
   | { role: "assistant"; content: string | null; tool_calls?: ToolCall[] }
   | { role: "tool"; tool_call_id: string; content: string };
 
@@ -31,9 +32,14 @@ export interface ChatResult {
 
 export type ChatFn = (request: ChatRequest) => Promise<ChatResult>;
 
+export type Protocol = "openai" | "anthropic";
+
 export interface ModelConfig {
   id: string;
   label: string;
+  protocol: Protocol;
+  baseUrl: string;
+  apiKey: string;
   inputPricePerMTok: number;
   outputPricePerMTok: number;
 }
@@ -68,6 +74,7 @@ export interface RunRecord {
 export interface ModelSummary {
   modelId: string;
   label: string;
+  protocol: Protocol;
   tasks: number;
   completed: number;
   correct: number;
@@ -84,4 +91,11 @@ export interface ModelSummary {
   recoveryAttempts: number;
   recoveredRuns: number;
   runs: RunRecord[];
+}
+
+export interface EvalReport {
+  generatedAt: string;
+  maxSteps: number;
+  tasks: Array<Pick<Task, "id" | "prompt" | "tools" | "expected">>;
+  models: ModelSummary[];
 }
