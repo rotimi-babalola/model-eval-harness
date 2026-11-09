@@ -5,8 +5,16 @@ export interface ToolCall {
 }
 
 export type ChatMessage =
-  | { role: "system" | "user"; content: string }
-  | { role: "assistant"; content: string | null; tool_calls?: ToolCall[] }
+  | { role: "system"; content: string }
+  | { role: "user"; content: string }
+  | {
+      role: "assistant";
+      content: string | null;
+      tool_calls?: ToolCall[];
+      // Raw Responses API output items (reasoning, message, function_call) that
+      // must be replayed so reasoning models keep their context across tool calls.
+      responsesOutput?: unknown[];
+    }
   | { role: "tool"; tool_call_id: string; content: string };
 
 export interface ToolSchema {
@@ -31,9 +39,24 @@ export interface ChatResult {
 
 export type ChatFn = (request: ChatRequest) => Promise<ChatResult>;
 
+export type Protocol = "openai" | "openai-responses" | "anthropic";
+
+export type ReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
+
 export interface ModelConfig {
   id: string;
   label: string;
+  protocol: Protocol;
+  baseUrl: string;
+  apiKey: string;
+  reasoningEffort?: ReasoningEffort;
   inputPricePerMTok: number;
   outputPricePerMTok: number;
 }
@@ -68,6 +91,8 @@ export interface RunRecord {
 export interface ModelSummary {
   modelId: string;
   label: string;
+  protocol: Protocol;
+  reasoningEffort?: ReasoningEffort;
   tasks: number;
   completed: number;
   correct: number;
@@ -84,4 +109,11 @@ export interface ModelSummary {
   recoveryAttempts: number;
   recoveredRuns: number;
   runs: RunRecord[];
+}
+
+export interface EvalReport {
+  generatedAt: string;
+  maxSteps: number;
+  tasks: Array<Pick<Task, "id" | "prompt" | "tools" | "expected">>;
+  models: ModelSummary[];
 }
